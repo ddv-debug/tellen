@@ -158,7 +158,61 @@ def ingest_csv(content: bytes):
 
     return rows
 
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
+DRIVE_FOLDER_NAME = "Voorraadtellen"
+SERVICE_ACCOUNT_FILE = "service_account.json"
+
+def drive_import():
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE,
+        scopes=["https://www.googleapis.com/auth/drive.readonly"],
+    )
+
+    service = build("drive", "v3", credentials=credentials)
+
+    results = service.files().list(
+        q=f"name='{DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder'",
+        spaces="drive",
+        fields="files(id, name)"
+    ).execute()
+
+    folders = results.get("files", [])
+    if not folders:
+        return
+
+    folder_id = folders[0]["id"]
+
+    vestigingen = ["Leeuwarden", "Sneek", "Drachten"]
+
+    conn = db()
+    cur = conn.cursor()
+
+    for vestiging in vestigingen:
+        results = service.files().list(
+            q=f"name='{vestiging}.csv' and '{folder_id}' in parents",
+            fields="files(id, name)"
+        ).execute()
+
+        files = results.get("files", [])
+        if not files:
+            continue
+
+        file_id = files[0]["id"]
+        request = service.files().get_media(fileId=file_id)
+        content = request.execute()
+
+        rows = ingest_csv(content)
+
+        cur.execute("DELETE FROM stock WHERE vestiging=?", (vestiging,))
+        cur.executemany(
+            "INSERT INTO stock(vestiging, artikelcode, locatie, voorraad, omschrijving) VALUES (?,?,?,?,?)",
+            [(vestiging, r[0], r[1], r[2], r[3]) for r in rows],
+        )
+
+    conn.commit()
+    conn.close()
 # -------------------- Routes --------------------
 
 @app.get("/", response_class=HTMLResponse)
