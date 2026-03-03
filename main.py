@@ -359,7 +359,18 @@ async def verwerk(selection_id: str, request: Request):
         "verwerkt.html",
         {"request": request, "selection_id": selection_id},
     )
+import threading
+import time
 
+def background_drive_import():
+    while True:
+        try:
+            drive_import()
+        except Exception as e:
+            print("Drive import fout:", e)
+        time.sleep(600)  # elke 10 minuten
+
+threading.Thread(target=background_drive_import, daemon=True).start()
 
 # -------------------- Server --------------------
 
