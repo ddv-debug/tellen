@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  
+<style>
+:root{
+  --bg:#0f1115;
+  --card:#171a21;
+  --border:#242836;
+  --text:#e7eaf0;
+  --muted:#9aa3b2;
+  --primary:#d00000;
+  --ok:#0a7a3d;
+  --input:#121520;
+}
+*{box-sizing:border-box}
+body{background:var(--bg); color:var(--text); font-family:Arial, sans-serif; margin:24px; max-width:1120px;}
+.header{display:flex; align-items:center; gap:14px; margin-bottom:18px;}
+.header img{height:44px;}
+.h1{font-size:26px; font-weight:800; margin:0;}
+.muted{color:var(--muted);}
+.card{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; margin:14px 0;}
+.row{display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;}
+label{display:block; font-weight:700; margin:0 0 6px 0;}
+input[type="text"], input[type="number"]{background:var(--input); color:var(--text); border:1px solid var(--border); padding:10px 12px; border-radius:10px; width:240px;}
+input[type="file"]{color:var(--text);}
+button, a.btn{display:inline-block; padding:10px 14px; border-radius:10px; border:0; cursor:pointer; font-weight:800; text-decoration:none;}
+.btnPrimary{background:var(--primary); color:#fff;}
+.btnOk{background:var(--ok); color:#fff;}
+.btnGhost{background:#2a2f3f; color:#fff;}
+table{width:100%; border-collapse:collapse; margin-top:14px; background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden;}
+th, td{padding:10px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top;}
+th{background:#141824; position:sticky; top:0;}
+.small{width:110px;}
+.error{background:#33131a; border:1px solid #5a1a26; padding:12px; border-radius:12px; margin-bottom:12px;}
+.footerbar{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px;}
+</style>
+
+</head>
+<body>
+  <div class="header">
+    <img src="/static/logo.png" alt="Logo">
+    <div>
+      <div class="h1">Verwerkt</div>
+      <div class="muted">Selectie {{ selection_id }} is verwerkt. Historie is bijgewerkt. Mail is verzonden als config.json klopt.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <a class="btn btnPrimary" href="/">Nieuwe selectie</a>
+      <a class="btn btnGhost" href="/download_tellijst/{{ selection_id }}">Download tellijst csv</a>
+    </div>
+    <div class="muted" style="margin-top:12px;">
+      Office365 SMTP server smtp.office365.com poort 587 met starttls. SMTP AUTH moet aan staan op mailbox.
+    </div>
+  </div>
+</body>
+</html>
