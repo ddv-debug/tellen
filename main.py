@@ -133,45 +133,48 @@ init_db()
 
 
 # -------------------- Mail --------------------
+import requests
+import os
+import base64
+
+
 def send_mail(csv_bytes: bytes, vestiging: str):
 
-    import os
-    import requests
-
     api_key = os.getenv("RESEND_API_KEY")
-
-    print("API KEY:", api_key)
 
     if not api_key:
         print("GEEN API KEY")
         return
 
+    # CSV naar base64 omzetten
+    encoded = base64.b64encode(csv_bytes).decode()
+
     headers = {
-        "Authorization": f"Bearer {api_key}"
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
     }
 
-    files = {
-        "file": ("afwijkingen.csv", csv_bytes)
-    }
-
-    data = {
+    payload = {
         "from": "tellingen@ypekramer.nl",
         "to": ["tellenypekramer@gmail.com"],
         "subject": f"Voorraad afwijkingen {vestiging}",
-        "html": "<p>Zie bijlage.</p>"
+        "html": "<p>Zie bijlage voor voorraad afwijkingen.</p>",
+        "attachments": [
+            {
+                "filename": "afwijkingen.csv",
+                "content": encoded
+            }
+        ]
     }
 
     r = requests.post(
         "https://api.resend.com/emails",
         headers=headers,
-        data=data,
-        files=files
+        json=payload
     )
 
     print("MAIL STATUS:", r.status_code)
     print("MAIL RESPONSE:", r.text)
-    
-
 
 # -------------------- FastAPI Setup --------------------
 
