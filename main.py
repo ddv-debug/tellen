@@ -155,7 +155,7 @@ def send_mail(csv_bytes: bytes, vestiging: str):
     }
 
     payload = {
-        "from": "tellenypekramer@gmail.com",
+        "from": "onboarding@resend.dev",
         "to": ["tellenypekramer@gmail.com"],
         "subject": f"Voorraad afwijkingen {vestiging}",
         "html": "<p>Zie bijlage voor voorraad afwijkingen.</p>",
