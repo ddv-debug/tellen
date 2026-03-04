@@ -257,8 +257,10 @@ async def upload(
                 "historie": historie
             },
         )
-
-    rows = ingest_csv(content)
+        
+        
+        
+        rows = ingest_csv(content)
 
     selection_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
