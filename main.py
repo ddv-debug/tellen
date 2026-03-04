@@ -133,7 +133,7 @@ init_db()
 
 
 # -------------------- Mail --------------------
-
+print("MAIL WORDT AANGEROEPEN")
 def send_mail(csv_bytes: bytes, vestiging: str):
     cfg = read_config()
 
