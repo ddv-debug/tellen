@@ -1,93 +1,115 @@
-<!doctype html>
-<html lang="nl">
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title }}</title>
-  
+<meta charset="UTF-8">
+<title>{{ title }}</title>
+
 <style>
-:root{
-  --bg:#0f1115;
-  --card:#171a21;
-  --border:#242836;
-  --text:#e7eaf0;
-  --muted:#9aa3b2;
-  --primary:#d00000;
-  --ok:#0a7a3d;
-  --input:#121520;
+
+body{
+font-family: Arial;
+background:#f4f6f8;
+padding:30px;
 }
-*{box-sizing:border-box}
-body{background:var(--bg); color:var(--text); font-family:Arial, sans-serif; margin:24px; max-width:1120px;}
-.header{display:flex; align-items:center; gap:14px; margin-bottom:18px;}
-.header img{height:44px;}
-.h1{font-size:26px; font-weight:800; margin:0;}
-.muted{color:var(--muted);}
-.card{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; margin:14px 0;}
-.row{display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;}
-label{display:block; font-weight:700; margin:0 0 6px 0;}
-input[type="text"], input[type="number"]{background:var(--input); color:var(--text); border:1px solid var(--border); padding:10px 12px; border-radius:10px; width:240px;}
-input[type="file"]{color:var(--text);}
-button, a.btn{display:inline-block; padding:10px 14px; border-radius:10px; border:0; cursor:pointer; font-weight:800; text-decoration:none;}
-.btnPrimary{background:var(--primary); color:#fff;}
-.btnOk{background:var(--ok); color:#fff;}
-.btnGhost{background:#2a2f3f; color:#fff;}
-table{width:100%; border-collapse:collapse; margin-top:14px; background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden;}
-th, td{padding:10px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top;}
-th{background:#141824; position:sticky; top:0;}
-.small{width:110px;}
-.error{background:#33131a; border:1px solid #5a1a26; padding:12px; border-radius:12px; margin-bottom:12px;}
-.footerbar{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px;}
+
+.card{
+background:white;
+padding:25px;
+border-radius:8px;
+max-width:500px;
+margin:auto;
+box-shadow:0 3px 10px rgba(0,0,0,0.1);
+}
+
+h2{
+margin-top:0;
+}
+
+select,input,button{
+width:100%;
+padding:10px;
+margin-top:8px;
+margin-bottom:15px;
+font-size:16px;
+}
+
+button{
+background:#1f4ed8;
+color:white;
+border:none;
+cursor:pointer;
+}
+
+button:hover{
+background:#1637a3;
+}
+
+.historie{
+margin-top:25px;
+font-size:14px;
+}
+
+.error{
+color:red;
+margin-bottom:15px;
+}
+
 </style>
 
 </head>
+
 <body>
-  <div class="header">
-    <img src="/static/logo.png" alt="Logo">
-    <div>
-      <div class="h1">{{ title }}</div>
-      <div class="muted">Upload csv, kies aantal, genereer tellijst. Getelde artikelen worden uitgesloten.</div>
-    </div>
-  </div>
 
-  {% if error %}
-    <div class="error">{{ error }}</div>
-  {% endif %}
+<div class="card">
 
-  <div class="card">
-    <form action="/upload" method="post" enctype="multipart/form-data">
+<h2>Voorraadtellen</h2>
 
-  <label>Vestiging</label>
-  <select name="vestiging" required>
-    <option value="Leeuwarden">Leeuwarden</option>
-    <option value="Sneek">Sneek</option>
-    <option value="Drachten">Drachten</option>
-  </select>
+{% if error %}
+<div class="error">
+{{ error }}
+</div>
+{% endif %}
 
-  <br><br>
+<form action="/upload" method="post">
 
-  <label>CSV Bestand</label>
-  <input type="file" name="file" required>
+<label>Vestiging</label>
 
-  <br><br>
+<select name="vestiging">
 
-  <label>Aantal te tellen</label>
-  <input type="number" name="aantal" value="25">
+<option value="Leeuwarden">Leeuwarden</option>
+<option value="Sneek">Sneek</option>
+<option value="Drachten">Drachten</option>
 
-  <br><br>
+</select>
 
-  <button type="submit">Genereer tellijst</button>
+
+<label>Aantal artikelen</label>
+
+<input type="number" name="aantal" value="25">
+
+
+<button type="submit">
+Start telling
+</button>
 
 </form>
-  </div>
 
-  <div class="card">
-    <div><b>Historie per vestiging</b></div>
-<div>Leeuwarden: {{ historie["Leeuwarden"] }}</div>
-<div>Sneek: {{ historie["Sneek"] }}</div>
-<div>Drachten: {{ historie["Drachten"] }}</div>
-    <div class="muted" style="margin-top:8px;">
-      Mailen werkt zodra config.json is ingevuld.
-    </div>
-  </div>
+
+<div class="historie">
+
+<b>Historie geteld:</b>
+
+<ul>
+
+<li>Leeuwarden: {{ historie["Leeuwarden"] }}</li>
+<li>Sneek: {{ historie["Sneek"] }}</li>
+<li>Drachten: {{ historie["Drachten"] }}</li>
+
+</ul>
+
+</div>
+
+</div>
+
 </body>
 </html>
