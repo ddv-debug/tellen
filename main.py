@@ -133,40 +133,40 @@ init_db()
 
 
 # -------------------- Mail --------------------
-print("MAIL WORDT AANGEROEPEN")
+import requests
+import os
+
 def send_mail(csv_bytes: bytes, vestiging: str):
-    cfg = read_config()
 
-    smtp_server = cfg.get("smtp_server", "smtp.gmail.com")
-    smtp_port = int(cfg.get("smtp_port", 587))
-    smtp_user = cfg.get("smtp_user", "")
-    smtp_pass = cfg.get("smtp_pass", "")
-    mail_from = cfg.get("mail_from", smtp_user)
-    mail_to = cfg.get("mail_to", "")
+    api_key = os.getenv("RESEND_API_KEY")
 
-    if not smtp_user or not smtp_pass or not mail_to:
-        print("Mail config ontbreekt.")
+    if not api_key:
+        print("GEEN RESEND API KEY")
         return
 
-    msg = EmailMessage()
-    msg["Subject"] = f"Voorraad afwijkingen - {vestiging}"
-    msg["From"] = mail_from
-    msg["To"] = mail_to
-    msg.set_content(f"Afwijkingen vestiging {vestiging} in bijlage.")
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
 
-    msg.add_attachment(
-        csv_bytes,
-        maintype="text",
-        subtype="csv",
-        filename=f"afwijkingen_{vestiging}_{date.today().isoformat()}.csv",
+    files = {
+        "file": ("afwijkingen.csv", csv_bytes)
+    }
+
+    data = {
+        "from": "tellingen@ypekramer.nl",
+        "to": ["tellenypekramer@gmail.com"],
+        "subject": f"Voorraad afwijkingen {vestiging}",
+        "html": "<p>Zie bijlage voor afwijkingen.</p>"
+    }
+
+    r = requests.post(
+        "https://api.resend.com/emails",
+        headers=headers,
+        data=data,
+        files=files
     )
 
-    with smtplib.SMTP(smtp_server, smtp_port, timeout=30) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(smtp_user, smtp_pass)
-        server.send_message(msg)
+    print("MAIL STATUS:", r.status_code)
 
 
 # -------------------- FastAPI Setup --------------------
