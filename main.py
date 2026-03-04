@@ -234,15 +234,29 @@ async def upload(
 
     content = download_csv_from_drive(filename)
 
-    if not content:
-        return templates.TemplateResponse(
-            "index.html",
-            {
-                "request": request,
-                "title": APP_TITLE,
-                "error": f"Bestand {filename} niet gevonden in Google Drive"
-            },
-        )
+if not content:
+
+    conn = db()
+    cur = conn.cursor()
+
+    vestigingen = ["Leeuwarden","Sneek","Drachten"]
+    historie = {}
+
+    for v in vestigingen:
+        cur.execute("SELECT COUNT(1) FROM counted WHERE vestiging=?", (v,))
+        historie[v] = cur.fetchone()[0]
+
+    conn.close()
+
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "title": APP_TITLE,
+            "error": f"Bestand {filename} niet gevonden in Google Drive",
+            "historie": historie
+        },
+    )
 
     rows = ingest_csv(content)
 
