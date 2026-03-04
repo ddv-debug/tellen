@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -15,10 +15,15 @@ import smtplib
 from email.message import EmailMessage
 import json
 
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
 
 APP_TITLE = "Ype Kramer Tellingen"
 DB_PATH = "app.db"
 CONFIG_PATH = "config.json"
+
+SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
 
 
 # -------------------- Helpers --------------------
@@ -42,6 +47,34 @@ def read_config():
             return json.load(f)
     except Exception:
         return {}
+
+
+# -------------------- Google Drive --------------------
+
+def download_csv_from_drive(filename):
+
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE,
+        scopes=["https://www.googleapis.com/auth/drive.readonly"],
+    )
+
+    service = build("drive", "v3", credentials=credentials)
+
+    results = service.files().list(
+        q=f"name='{filename}' and trashed=false",
+        fields="files(id, name)"
+    ).execute()
+
+    files = results.get("files", [])
+
+    if not files:
+        return None
+
+    file_id = files[0]["id"]
+
+    request = service.files().get_media(fileId=file_id)
+
+    return request.execute()
 
 
 # -------------------- Database --------------------
@@ -119,21 +152,20 @@ def send_mail(csv_bytes: bytes, vestiging: str):
     )
 
     with smtplib.SMTP(smtp_server, smtp_port, timeout=30) as server:
-        server.ehlo()
         server.starttls()
-        server.ehlo()
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
 
 
-# -------------------- App Setup --------------------
+# -------------------- FastAPI Setup --------------------
 
 app = FastAPI(title=APP_TITLE)
+
 templates = Jinja2Templates(directory=resource_path("templates"))
 app.mount("/static", StaticFiles(directory=resource_path("static")), name="static")
 
 
-# -------------------- CSV --------------------
+# -------------------- CSV Parser --------------------
 
 def ingest_csv(content: bytes):
     text = content.decode("utf-8-sig", errors="ignore")
@@ -141,86 +173,38 @@ def ingest_csv(content: bytes):
 
     rows = []
     for i, r in enumerate(reader):
+
         if i == 0:
             continue
+
         if not r:
             continue
 
         art = r[0].strip()
         loc = r[1].strip() if len(r) > 1 else ""
+
         try:
             qty = int(r[2]) if len(r) > 2 else 0
         except:
             qty = 0
+
         desc = r[3].strip() if len(r) > 3 else ""
 
         rows.append((art, loc, qty, desc))
 
     return rows
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
 
-DRIVE_FOLDER_NAME = "Voorraadtellen"
-SERVICE_ACCOUNT_FILE = "service_account.json"
-
-def drive_import():
-    credentials = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE,
-        scopes=["https://www.googleapis.com/auth/drive.readonly"],
-    )
-
-    service = build("drive", "v3", credentials=credentials)
-
-    results = service.files().list(
-        q=f"name='{DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder'",
-        spaces="drive",
-        fields="files(id, name)"
-    ).execute()
-
-    folders = results.get("files", [])
-    if not folders:
-        return
-
-    folder_id = folders[0]["id"]
-
-    vestigingen = ["Leeuwarden", "Sneek", "Drachten"]
-
-    conn = db()
-    cur = conn.cursor()
-
-    for vestiging in vestigingen:
-        results = service.files().list(
-            q=f"name='{vestiging}.csv' and '{folder_id}' in parents",
-            fields="files(id, name)"
-        ).execute()
-
-        files = results.get("files", [])
-        if not files:
-            continue
-
-        file_id = files[0]["id"]
-        request = service.files().get_media(fileId=file_id)
-        content = request.execute()
-
-        rows = ingest_csv(content)
-
-        cur.execute("DELETE FROM stock WHERE vestiging=?", (vestiging,))
-        cur.executemany(
-            "INSERT INTO stock(vestiging, artikelcode, locatie, voorraad, omschrijving) VALUES (?,?,?,?,?)",
-            [(vestiging, r[0], r[1], r[2], r[3]) for r in rows],
-        )
-
-    conn.commit()
-    conn.close()
 # -------------------- Routes --------------------
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+
     conn = db()
     cur = conn.cursor()
 
     vestigingen = ["Leeuwarden", "Sneek", "Drachten"]
+
     historie = {}
 
     for v in vestigingen:
@@ -242,11 +226,24 @@ def home(request: Request):
 @app.post("/upload")
 async def upload(
     request: Request,
-    file: UploadFile = File(...),
     vestiging: str = Form(...),
     aantal: int = Form(25),
 ):
-    content = await file.read()
+
+    filename = f"{vestiging}.csv"
+
+    content = download_csv_from_drive(filename)
+
+    if not content:
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "title": APP_TITLE,
+                "error": f"Bestand {filename} niet gevonden in Google Drive"
+            },
+        )
+
     rows = ingest_csv(content)
 
     selection_id = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -254,7 +251,8 @@ async def upload(
     conn = db()
     cur = conn.cursor()
 
-    cur.execute("DELETE FROM stock WHERE vestiging = ?", (vestiging,))
+    cur.execute("DELETE FROM stock WHERE vestiging=?", (vestiging,))
+
     cur.executemany(
         "INSERT INTO stock(vestiging, artikelcode, locatie, voorraad, omschrijving) VALUES (?,?,?,?,?)",
         [(vestiging, r[0], r[1], r[2], r[3]) for r in rows],
@@ -288,6 +286,7 @@ async def upload(
 
 @app.get("/tellen/{selection_id}", response_class=HTMLResponse)
 def tellen(selection_id: str, request: Request):
+
     conn = db()
     cur = conn.cursor()
 
@@ -297,26 +296,35 @@ def tellen(selection_id: str, request: Request):
         WHERE selection_id=?
         ORDER BY locatie
     """, (selection_id,))
+
     rows = cur.fetchall()
+
     conn.close()
 
     return templates.TemplateResponse(
         "tellen.html",
-        {"request": request, "selection_id": selection_id, "rows": rows},
+        {
+            "request": request,
+            "selection_id": selection_id,
+            "rows": rows,
+        },
     )
 
 
 @app.post("/verwerk/{selection_id}")
 async def verwerk(selection_id: str, request: Request):
+
     form = await request.form()
 
     conn = db()
     cur = conn.cursor()
+
     cur.execute("""
         SELECT id, vestiging, artikelcode, locatie, voorraad, omschrijving
         FROM selections
         WHERE selection_id=?
     """, (selection_id,))
+
     rows = cur.fetchall()
 
     if not rows:
@@ -327,9 +335,11 @@ async def verwerk(selection_id: str, request: Request):
 
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
+
     w.writerow(["Artikelcode", "Locatie", "Systeem", "Geteld", "Verschil"])
 
     for r in rows:
+
         raw = (form.get(f"geteld_{r['id']}") or "").strip()
 
         try:
@@ -340,7 +350,14 @@ async def verwerk(selection_id: str, request: Request):
         systeem = int(r["voorraad"])
 
         if geteld != systeem:
-            w.writerow([r["artikelcode"], r["locatie"], systeem, geteld, geteld - systeem])
+
+            w.writerow([
+                r["artikelcode"],
+                r["locatie"],
+                systeem,
+                geteld,
+                geteld - systeem
+            ])
 
         cur.execute("""
             INSERT INTO counted(vestiging, artikelcode, counted_date)
@@ -353,43 +370,10 @@ async def verwerk(selection_id: str, request: Request):
     conn.close()
 
     csv_bytes = buf.getvalue().encode("utf-8-sig")
+
     send_mail(csv_bytes, vestiging)
 
     return templates.TemplateResponse(
         "verwerkt.html",
         {"request": request, "selection_id": selection_id},
     )
-import threading
-import time
-
-def background_drive_import():
-    while True:
-        try:
-            drive_import()
-        except Exception as e:
-            print("Drive import fout:", e)
-        time.sleep(600)  # elke 10 minuten
-
-threading.Thread(target=background_drive_import, daemon=True).start()
-
-# -------------------- Server --------------------
-
-def find_free_port(start=8000, end=8100):
-    import socket
-    for port in range(start, end):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", port)) != 0:
-                return port
-    raise RuntimeError("Geen vrije poort gevonden")
-
-
-def run_server():
-    import uvicorn
-    port = find_free_port()
-    import threading, webbrowser
-    threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
-    uvicorn.run(app, host="0.0.0.0", port=port, log_config=None)
-
-
-if __name__ == "__main__":
-    run_server()
