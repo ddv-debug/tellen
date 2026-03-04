@@ -23,6 +23,7 @@ APP_TITLE = "Ype Kramer Tellingen"
 DB_PATH = "app.db"
 CONFIG_PATH = "config.json"
 
+# Render secret file path
 SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
 
 
@@ -49,10 +50,21 @@ def read_config():
         return {}
 
 
+def get_historie_counts() -> dict:
+    vestigingen = ["Leeuwarden", "Sneek", "Drachten"]
+    historie = {}
+    conn = db()
+    cur = conn.cursor()
+    for v in vestigingen:
+        cur.execute("SELECT COUNT(1) FROM counted WHERE vestiging=?", (v,))
+        historie[v] = cur.fetchone()[0]
+    conn.close()
+    return historie
+
+
 # -------------------- Google Drive --------------------
 
-def download_csv_from_drive(filename):
-
+def download_csv_from_drive(filename: str):
     credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
         scopes=["https://www.googleapis.com/auth/drive.readonly"],
@@ -62,18 +74,16 @@ def download_csv_from_drive(filename):
 
     results = service.files().list(
         q=f"name='{filename}' and trashed=false",
-        fields="files(id, name)"
+        fields="files(id, name)",
+        pageSize=5,
     ).execute()
 
     files = results.get("files", [])
-
     if not files:
         return None
 
     file_id = files[0]["id"]
-
     request = service.files().get_media(fileId=file_id)
-
     return request.execute()
 
 
@@ -152,7 +162,9 @@ def send_mail(csv_bytes: bytes, vestiging: str):
     )
 
     with smtplib.SMTP(smtp_server, smtp_port, timeout=30) as server:
+        server.ehlo()
         server.starttls()
+        server.ehlo()
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
 
@@ -160,7 +172,6 @@ def send_mail(csv_bytes: bytes, vestiging: str):
 # -------------------- FastAPI Setup --------------------
 
 app = FastAPI(title=APP_TITLE)
-
 templates = Jinja2Templates(directory=resource_path("templates"))
 app.mount("/static", StaticFiles(directory=resource_path("static")), name="static")
 
@@ -173,22 +184,23 @@ def ingest_csv(content: bytes):
 
     rows = []
     for i, r in enumerate(reader):
-
         if i == 0:
             continue
-
         if not r:
             continue
 
-        art = r[0].strip()
-        loc = r[1].strip() if len(r) > 1 else ""
+        art = (r[0] if len(r) > 0 else "").strip()
+        if not art:
+            continue
+
+        loc = (r[1] if len(r) > 1 else "").strip()
 
         try:
-            qty = int(r[2]) if len(r) > 2 else 0
-        except:
+            qty = int((r[2] if len(r) > 2 else "0").strip() or 0)
+        except Exception:
             qty = 0
 
-        desc = r[3].strip() if len(r) > 3 else ""
+        desc = (r[3] if len(r) > 3 else "").strip()
 
         rows.append((art, loc, qty, desc))
 
@@ -199,27 +211,10 @@ def ingest_csv(content: bytes):
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-
-    conn = db()
-    cur = conn.cursor()
-
-    vestigingen = ["Leeuwarden", "Sneek", "Drachten"]
-
-    historie = {}
-
-    for v in vestigingen:
-        cur.execute("SELECT COUNT(1) FROM counted WHERE vestiging=?", (v,))
-        historie[v] = cur.fetchone()[0]
-
-    conn.close()
-
+    historie = get_historie_counts()
     return templates.TemplateResponse(
         "index.html",
-        {
-            "request": request,
-            "title": APP_TITLE,
-            "historie": historie
-        },
+        {"request": request, "title": APP_TITLE, "historie": historie, "error": None},
     )
 
 
@@ -229,38 +224,34 @@ async def upload(
     vestiging: str = Form(...),
     aantal: int = Form(25),
 ):
-
     filename = f"{vestiging}.csv"
-
     content = download_csv_from_drive(filename)
 
     if not content:
-
-        conn = db()
-        cur = conn.cursor()
-
-        vestigingen = ["Leeuwarden","Sneek","Drachten"]
-        historie = {}
-
-        for v in vestigingen:
-            cur.execute("SELECT COUNT(1) FROM counted WHERE vestiging=?", (v,))
-            historie[v] = cur.fetchone()[0]
-
-        conn.close()
-
+        historie = get_historie_counts()
         return templates.TemplateResponse(
             "index.html",
             {
                 "request": request,
                 "title": APP_TITLE,
                 "error": f"Bestand {filename} niet gevonden in Google Drive",
-                "historie": historie
+                "historie": historie,
             },
         )
-        
-        
-        
-        rows = ingest_csv(content)
+
+    rows = ingest_csv(content)
+
+    if not rows:
+        historie = get_historie_counts()
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "title": APP_TITLE,
+                "error": f"Bestand {filename} bevat geen regels",
+                "historie": historie,
+            },
+        )
 
     selection_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
@@ -268,7 +259,6 @@ async def upload(
     cur = conn.cursor()
 
     cur.execute("DELETE FROM stock WHERE vestiging=?", (vestiging,))
-
     cur.executemany(
         "INSERT INTO stock(vestiging, artikelcode, locatie, voorraad, omschrijving) VALUES (?,?,?,?,?)",
         [(vestiging, r[0], r[1], r[2], r[3]) for r in rows],
@@ -278,19 +268,23 @@ async def upload(
         SELECT s.artikelcode, s.locatie, s.voorraad, s.omschrijving
         FROM stock s
         LEFT JOIN counted c
-        ON s.artikelcode = c.artikelcode
-        AND s.vestiging = c.vestiging
+          ON s.artikelcode = c.artikelcode
+         AND s.vestiging = c.vestiging
         WHERE s.vestiging = ?
-        AND c.artikelcode IS NULL
+          AND c.artikelcode IS NULL
         ORDER BY RANDOM()
         LIMIT ?
     """, (vestiging, int(aantal)))
 
     picked = cur.fetchall()
 
+    # Oude selection data voor dit id weg (veiligheid)
+    cur.execute("DELETE FROM selections WHERE selection_id=?", (selection_id,))
+
     for r in picked:
         cur.execute(
-            "INSERT INTO selections(vestiging, selection_id, artikelcode, locatie, voorraad, omschrijving) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO selections(vestiging, selection_id, artikelcode, locatie, voorraad, omschrijving) "
+            "VALUES (?,?,?,?,?,?)",
             (vestiging, selection_id, r["artikelcode"], r["locatie"], r["voorraad"], r["omschrijving"]),
         )
 
@@ -298,10 +292,10 @@ async def upload(
     conn.close()
 
     return RedirectResponse(url=f"/tellen/{selection_id}", status_code=303)
-    
-    @app.get("/tellen/{selection_id}", response_class=HTMLResponse)
-def tellen(selection_id: str, request: Request):
 
+
+@app.get("/tellen/{selection_id}", response_class=HTMLResponse)
+def tellen(selection_id: str, request: Request):
     conn = db()
     cur = conn.cursor()
 
@@ -309,26 +303,20 @@ def tellen(selection_id: str, request: Request):
         SELECT id, vestiging, artikelcode, locatie, voorraad, omschrijving
         FROM selections
         WHERE selection_id=?
-        ORDER BY locatie
+        ORDER BY COALESCE(locatie,''), artikelcode
     """, (selection_id,))
 
     rows = cur.fetchall()
-
     conn.close()
 
     return templates.TemplateResponse(
         "tellen.html",
-        {
-            "request": request,
-            "selection_id": selection_id,
-            "rows": rows,
-        },
+        {"request": request, "selection_id": selection_id, "rows": rows},
     )
 
 
 @app.post("/verwerk/{selection_id}")
 async def verwerk(selection_id: str, request: Request):
-
     form = await request.form()
 
     conn = db()
@@ -350,29 +338,20 @@ async def verwerk(selection_id: str, request: Request):
 
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
-
     w.writerow(["Artikelcode", "Locatie", "Systeem", "Geteld", "Verschil"])
 
     for r in rows:
-
         raw = (form.get(f"geteld_{r['id']}") or "").strip()
 
         try:
-            geteld = int(raw) if raw else int(r["voorraad"])
-        except:
-            geteld = int(r["voorraad"])
+            geteld = int(raw) if raw != "" else int(r["voorraad"] or 0)
+        except Exception:
+            geteld = int(r["voorraad"] or 0)
 
-        systeem = int(r["voorraad"])
+        systeem = int(r["voorraad"] or 0)
 
         if geteld != systeem:
-
-            w.writerow([
-                r["artikelcode"],
-                r["locatie"],
-                systeem,
-                geteld,
-                geteld - systeem
-            ])
+            w.writerow([r["artikelcode"], r["locatie"], systeem, geteld, geteld - systeem])
 
         cur.execute("""
             INSERT INTO counted(vestiging, artikelcode, counted_date)
@@ -385,7 +364,6 @@ async def verwerk(selection_id: str, request: Request):
     conn.close()
 
     csv_bytes = buf.getvalue().encode("utf-8-sig")
-
     send_mail(csv_bytes, vestiging)
 
     return templates.TemplateResponse(
