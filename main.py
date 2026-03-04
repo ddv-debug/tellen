@@ -136,7 +136,7 @@ init_db()
 def send_mail(csv_bytes: bytes, vestiging: str):
 
     smtp_server = "smtp.gmail.com"
-    smtp_port = 587
+    smtp_port = 465
 
     smtp_user = "ypekramertellen@gmail.com"
     smtp_pass = "pqfqurnljivqqsqy"
