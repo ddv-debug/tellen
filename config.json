@@ -1,0 +1,8 @@
+{
+  "smtp_server": "smtp.gmail.com",
+  "smtp_port": 587,
+  "smtp_user": "ypekramertellen@gmail.com",
+  "smtp_pass": "pqfqurnljivqqsqy",
+  "mail_from": "ypekramertellen@gmail.com",
+  "mail_to": "daniel@gmail.com"
+}
