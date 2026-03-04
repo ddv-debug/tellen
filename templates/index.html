@@ -100,10 +100,9 @@ Start telling
 <b>Historie geteld:</b>
 
 <ul>
-
-<li>Leeuwarden: {{ historie["Leeuwarden"] }}</li>
-<li>Sneek: {{ historie["Sneek"] }}</li>
-<li>Drachten: {{ historie["Drachten"] }}</li>
+<li>Leeuwarden: {{ historie.get("Leeuwarden",0) if historie else 0 }}</li>
+<li>Sneek: {{ historie.get("Sneek",0) if historie else 0 }}</li>
+<li>Drachten: {{ historie.get("Drachten",0) if historie else 0 }}</li>
 
 </ul>
 
