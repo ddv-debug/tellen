@@ -139,7 +139,7 @@ def send_mail(csv_bytes: bytes, vestiging: str):
     smtp_port = 587
 
     smtp_user = "ypekramertellen@gmail.com"
-    smtp_pass = "pqfq urnl jivq qsqy"
+    smtp_pass = "pqfqurnljivqqsqy"
 
     mail_from = "ypekramertellen@gmail.com"
     mail_to = "daniel@ypekramer.nl"
