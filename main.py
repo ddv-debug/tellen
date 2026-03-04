@@ -133,48 +133,35 @@ init_db()
 
 
 # -------------------- Mail --------------------
-import requests
-import os
-import base64
-
-
 def send_mail(csv_bytes: bytes, vestiging: str):
 
-    api_key = os.getenv("RESEND_API_KEY")
+    smtp_server = "smtp.gmail.com"
+    smtp_port = 587
 
-    if not api_key:
-        print("GEEN API KEY")
-        return
+    smtp_user = "ypekramertellen@gmail.com"
+    smtp_pass = "pqfq urnl jivq qsqy"
 
-    # CSV naar base64 omzetten
-    encoded = base64.b64encode(csv_bytes).decode()
+    mail_from = "ypekramertellen@gmail.com"
+    mail_to = "daniel@ypekramer.nl"
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+    msg = EmailMessage()
+    msg["Subject"] = f"Voorraad afwijkingen - {vestiging}"
+    msg["From"] = mail_from
+    msg["To"] = mail_to
 
-    payload = {
-        "from": "onboarding@resend.dev",
-        "to": ["tellenypekramer@gmail.com"],
-        "subject": f"Voorraad afwijkingen {vestiging}",
-        "html": "<p>Zie bijlage voor voorraad afwijkingen.</p>",
-        "attachments": [
-            {
-                "filename": "afwijkingen.csv",
-                "content": encoded
-            }
-        ]
-    }
+    msg.set_content("Zie bijlage voor voorraad afwijkingen.")
 
-    r = requests.post(
-        "https://api.resend.com/emails",
-        headers=headers,
-        json=payload
+    msg.add_attachment(
+        csv_bytes,
+        maintype="text",
+        subtype="csv",
+        filename=f"afwijkingen_{vestiging}.csv",
     )
 
-    print("MAIL STATUS:", r.status_code)
-    print("MAIL RESPONSE:", r.text)
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
 
 # -------------------- FastAPI Setup --------------------
 
