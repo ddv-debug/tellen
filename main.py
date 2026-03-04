@@ -133,15 +133,17 @@ init_db()
 
 
 # -------------------- Mail --------------------
-import requests
-import os
-
 def send_mail(csv_bytes: bytes, vestiging: str):
+
+    import os
+    import requests
 
     api_key = os.getenv("RESEND_API_KEY")
 
+    print("API KEY:", api_key)
+
     if not api_key:
-        print("GEEN RESEND API KEY")
+        print("GEEN API KEY")
         return
 
     headers = {
@@ -154,9 +156,9 @@ def send_mail(csv_bytes: bytes, vestiging: str):
 
     data = {
         "from": "tellingen@ypekramer.nl",
-        "to": ["daniel@ypekramer.nl"],
+        "to": ["tellenypekramer@gmail.com"],
         "subject": f"Voorraad afwijkingen {vestiging}",
-        "html": "<p>Zie bijlage voor afwijkingen.</p>"
+        "html": "<p>Zie bijlage.</p>"
     }
 
     r = requests.post(
@@ -167,6 +169,8 @@ def send_mail(csv_bytes: bytes, vestiging: str):
     )
 
     print("MAIL STATUS:", r.status_code)
+    print("MAIL RESPONSE:", r.text)
+    
 
 
 # -------------------- FastAPI Setup --------------------
