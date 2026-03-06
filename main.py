@@ -141,7 +141,9 @@ def init_db():
     """)
 
     conn.commit()
-    conn.close()
+conn.close()
+
+upload_db_to_drive()
 
 
 # Eerst database uit Drive laden
