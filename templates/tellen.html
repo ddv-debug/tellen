@@ -13,7 +13,6 @@
 --border:#242836;
 --text:#e7eaf0;
 --muted:#9aa3b2;
---primary:#d00000;
 --ok:#0a7a3d;
 --input:#121520;
 }
@@ -69,8 +68,6 @@ th{
 background:#141824;
 }
 
-.small{width:80px}
-
 input{
 background:var(--input);
 color:var(--text);
@@ -80,7 +77,7 @@ padding:10px;
 }
 
 .locatieveld{
-width:110px;
+width:120px;
 }
 
 .aantalveld{
@@ -163,7 +160,7 @@ align-items:stretch;
 <body>
 
 <div class="header">
-<img src="/static/logo.png" alt="Logo">
+<img src="/static/logo.png">
 <div>
 <div class="h1">Tellijst</div>
 <div class="muted">
@@ -181,8 +178,8 @@ Selectie {{ selection_id }} • {{ n }} artikelen
 <th>Artikel</th>
 <th>Locatie</th>
 <th>Locatie correctie</th>
-<th class="small">Systeem</th>
-<th class="small">Geteld</th>
+<th>Systeem</th>
+<th>Geteld</th>
 <th>Omschrijving</th>
 </tr>
 </thead>
@@ -211,8 +208,7 @@ placeholder="scan locatie">
 <input
 type="number"
 class="aantalveld"
-name="geteld_{{ r['id'] }}"
-value="{{ r['last_geteld'] if r['last_geteld'] is not none else '' }}">
+name="geteld_{{ r['id'] }}">
 </td>
 
 <td>{{ r["omschrijving"] }}</td>
@@ -229,12 +225,7 @@ value="{{ r['last_geteld'] if r['last_geteld'] is not none else '' }}">
 
 <a class="btn btnGhost" href="/">Terug</a>
 
-<a class="btn btnGhost" href="/download_tellijst/{{ selection_id }}">
-Download CSV
-</a>
-
-<button class="btnOk" type="submit"
-onclick="return confirm('Telling verwerken en mail versturen?')">
+<button class="btnOk" type="submit">
 Verwerken
 </button>
 
