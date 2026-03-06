@@ -60,22 +60,21 @@ def get_drive_service():
     )
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
-
 def get_drive_folder_id(service):
+
     results = service.files().list(
-        q=(
-            f"name='{DRIVE_FOLDER_NAME}' "
-            f"and mimeType='application/vnd.google-apps.folder' "
-            f"and trashed=false"
-        ),
+        q=f"name='{DRIVE_FOLDER_NAME}' and trashed=false",
         fields="files(id, name)",
         pageSize=10,
     ).execute()
 
     folders = results.get("files", [])
+
     if not folders:
+        print("MAP NIET GEVONDEN:", DRIVE_FOLDER_NAME)
         return None
-    return folders[0]["id"]
+
+    print("MAP GEVONDEN
 
 
 def find_file_in_drive(service, filename: str, folder_id: str | None = None):
