@@ -24,34 +24,37 @@ body{
 background:var(--bg);
 color:var(--text);
 font-family:Arial,sans-serif;
-margin:24px;
-max-width:1120px;
+margin:18px;
+max-width:1100px;
 }
 
 .header{
 display:flex;
 align-items:center;
-gap:14px;
-margin-bottom:18px;
+gap:12px;
+margin-bottom:16px;
 }
 
-.header img{height:44px;}
+.header img{height:42px;}
 
 .h1{
-font-size:26px;
+font-size:24px;
 font-weight:800;
 margin:0;
 }
 
-.muted{color:var(--muted);}
+.muted{
+color:var(--muted);
+font-size:14px;
+}
 
 table{
 width:100%;
 border-collapse:collapse;
-margin-top:14px;
+margin-top:10px;
 background:var(--card);
 border:1px solid var(--border);
-border-radius:14px;
+border-radius:12px;
 overflow:hidden;
 }
 
@@ -59,56 +62,61 @@ th,td{
 padding:10px;
 border-bottom:1px solid var(--border);
 text-align:left;
-vertical-align:top;
+vertical-align:middle;
 }
 
 th{
 background:#141824;
-position:sticky;
-top:0;
 }
 
-.small{width:110px;}
+.small{width:80px}
 
-input[type="text"],
-input[type="number"]{
+input{
 background:var(--input);
 color:var(--text);
 border:1px solid var(--border);
-padding:10px 12px;
-border-radius:10px;
+border-radius:8px;
+padding:10px;
 }
 
-.locatieveld{width:120px;}
-.opmerkingveld{width:180px;}
-.aantalveld{width:90px;}
+.locatieveld{
+width:110px;
+}
+
+.aantalveld{
+width:90px;
+font-size:18px;
+font-weight:700;
+text-align:center;
+}
 
 button,a.btn{
 display:inline-block;
-padding:10px 14px;
+padding:12px 16px;
 border-radius:10px;
 border:0;
 cursor:pointer;
-font-weight:800;
+font-weight:700;
 text-decoration:none;
 }
 
-.btnOk{background:var(--ok);color:#fff;}
-.btnGhost{background:#2a2f3f;color:#fff;}
+.btnOk{background:var(--ok);color:white}
+.btnGhost{background:#2a2f3f;color:white}
 
 .footerbar{
 display:flex;
 gap:10px;
 flex-wrap:wrap;
-align-items:center;
 margin-top:14px;
+align-items:center;
 }
+
+/* mobiel */
 
 @media (max-width:700px){
 
 body{
-margin:12px;
-max-width:100%;
+margin:10px;
 }
 
 .header{
@@ -127,15 +135,24 @@ font-size:18px;
 padding:12px;
 }
 
-.footerbar{
-flex-direction:column;
-align-items:stretch;
+.locatieveld{
+width:120px;
+}
+
+.aantalveld{
+width:100px;
+font-size:20px;
 }
 
 button,a.btn{
 width:100%;
-padding:14px;
+text-align:center;
 font-size:18px;
+}
+
+.footerbar{
+flex-direction:column;
+align-items:stretch;
 }
 
 }
@@ -149,7 +166,9 @@ font-size:18px;
 <img src="/static/logo.png" alt="Logo">
 <div>
 <div class="h1">Tellijst</div>
-<div class="muted">Selectie {{ selection_id }}. Aantal {{ n }}. Gesorteerd op locatie.</div>
+<div class="muted">
+Selectie {{ selection_id }} • {{ n }} artikelen
+</div>
 </div>
 </div>
 
@@ -160,9 +179,8 @@ font-size:18px;
 <thead>
 <tr>
 <th>Artikel</th>
-<th>Locatie systeem</th>
+<th>Locatie</th>
 <th>Locatie correctie</th>
-<th>Opmerking</th>
 <th class="small">Systeem</th>
 <th class="small">Geteld</th>
 <th>Omschrijving</th>
@@ -185,14 +203,6 @@ type="text"
 class="locatieveld"
 name="locatie_correctie_{{ r['id'] }}"
 placeholder="scan locatie">
-</td>
-
-<td>
-<input
-type="text"
-class="opmerkingveld"
-name="opmerking_{{ r['id'] }}"
-placeholder="bijv. verkeerde plek">
 </td>
 
 <td>{{ r["voorraad"] }}</td>
@@ -220,11 +230,12 @@ value="{{ r['last_geteld'] if r['last_geteld'] is not none else '' }}">
 <a class="btn btnGhost" href="/">Terug</a>
 
 <a class="btn btnGhost" href="/download_tellijst/{{ selection_id }}">
-Download tellijst csv
+Download CSV
 </a>
 
-<button class="btnOk" type="submit" onclick="return confirm('Verwerken en mailen')">
-Verwerken en mailen
+<button class="btnOk" type="submit"
+onclick="return confirm('Telling verwerken en mail versturen?')">
+Verwerken
 </button>
 
 <div class="muted">
