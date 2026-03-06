@@ -74,7 +74,12 @@ def get_drive_folder_id(service):
         print("MAP NIET GEVONDEN:", DRIVE_FOLDER_NAME)
         return None
 
-    print("MAP GEVONDEN
+    folder_id = folders[0]["id"]
+
+    print("MAP GEVONDEN:", DRIVE_FOLDER_NAME, folder_id)
+
+    return folder_id
+
 
 
 def find_file_in_drive(service, filename: str, folder_id: str | None = None):
