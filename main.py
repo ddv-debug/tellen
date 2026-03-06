@@ -11,20 +11,23 @@ import io
 import os
 import sys
 from datetime import datetime, date
-import smtplib
-from email.message import EmailMessage
 import json
+import base64
+import requests
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 
 APP_TITLE = "Ype Kramer Tellingen"
 DB_PATH = "/tmp/app.db"
 CONFIG_PATH = "config.json"
 
-# Render secret file path
 SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
+DRIVE_FOLDER_NAME = "Voorraadtellen"
+
+VESTIGINGEN = ["Leeuwarden", "Sneek", "Drachten"]
 
 
 # -------------------- Helpers --------------------
@@ -50,61 +53,138 @@ def read_config():
         return {}
 
 
-def get_historie_counts() -> dict:
-    vestigingen = ["Leeuwarden", "Sneek", "Drachten"]
-    historie = {}
-    conn = db()
-    cur = conn.cursor()
-    for v in vestigingen:
-        cur.execute("SELECT COUNT(1) FROM counted WHERE vestiging=?", (v,))
-        historie[v] = cur.fetchone()[0]
-    conn.close()
-    return historie
-
-
-# -------------------- Google Drive --------------------
-
-def download_csv_from_drive(filename: str):
+def get_drive_service():
     credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
-        scopes=["https://www.googleapis.com/auth/drive.readonly"],
+        scopes=["https://www.googleapis.com/auth/drive"],
     )
+    return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
-    service = build("drive", "v3", credentials=credentials)
+
+def get_drive_folder_id(service):
+    results = service.files().list(
+        q=(
+            f"name='{DRIVE_FOLDER_NAME}' "
+            f"and mimeType='application/vnd.google-apps.folder' "
+            f"and trashed=false"
+        ),
+        fields="files(id, name)",
+        pageSize=10,
+    ).execute()
+
+    folders = results.get("files", [])
+    if not folders:
+        return None
+    return folders[0]["id"]
+
+
+def find_file_in_drive(service, filename: str, folder_id: str | None = None):
+    if folder_id:
+        q = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+    else:
+        q = f"name='{filename}' and trashed=false"
 
     results = service.files().list(
-        q=f"name='{filename}' and trashed=false",
+        q=q,
         fields="files(id, name)",
-        pageSize=5,
+        pageSize=10,
     ).execute()
 
     files = results.get("files", [])
     if not files:
         return None
+    return files[0]
 
-    file_id = files[0]["id"]
-    request = service.files().get_media(fileId=file_id)
-    return request.execute()
+
+def download_file_from_drive(filename: str):
+    try:
+        service = get_drive_service()
+        folder_id = get_drive_folder_id(service)
+
+        file_info = find_file_in_drive(service, filename, folder_id)
+        if not file_info:
+            return None
+
+        request = service.files().get_media(fileId=file_info["id"])
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        return fh.getvalue()
+
+    except Exception as e:
+        print("DOWNLOAD DRIVE FOUT:", e)
+        return None
+
+
+def upload_file_to_drive(local_path: str, filename: str):
+    try:
+        if not os.path.exists(local_path):
+            print("UPLOAD DRIVE FOUT: bestand ontbreekt lokaal")
+            return
+
+        service = get_drive_service()
+        folder_id = get_drive_folder_id(service)
+
+        media = MediaFileUpload(local_path, mimetype="application/octet-stream")
+
+        existing = find_file_in_drive(service, filename, folder_id)
+
+        if existing:
+            service.files().update(
+                fileId=existing["id"],
+                media_body=media
+            ).execute()
+        else:
+            body = {"name": filename}
+            if folder_id:
+                body["parents"] = [folder_id]
+
+            service.files().create(
+                body=body,
+                media_body=media,
+                fields="id"
+            ).execute()
+
+        print(f"BESTAND GEUPLOAD NAAR DRIVE: {filename}")
+
+    except Exception as e:
+        print("UPLOAD DRIVE FOUT:", e)
+
+
+def load_db_from_drive():
+    content = download_file_from_drive("app.db")
+    if content:
+        with open(DB_PATH, "wb") as f:
+            f.write(content)
+        print("DATABASE GELADEN UIT GOOGLE DRIVE")
+    else:
+        print("GEEN DATABASE GEVONDEN IN GOOGLE DRIVE, NIEUWE WORDT GEMAAKT")
+
+
+def upload_db_to_drive():
+    upload_file_to_drive(DB_PATH, "app.db")
+
+
+def get_historie_counts() -> dict:
+    historie = {}
+    conn = db()
+    cur = conn.cursor()
+
+    for v in VESTIGINGEN:
+        cur.execute("SELECT COUNT(1) FROM counted WHERE vestiging=?", (v,))
+        historie[v] = cur.fetchone()[0]
+
+    conn.close()
+    return historie
 
 
 # -------------------- Database --------------------
 
-def load_db_from_drive():
-
-    try:
-        content = download_csv_from_drive("app.db")
-
-        if content:
-            with open(DB_PATH, "wb") as f:
-                f.write(content)
-            print("Database geladen uit Google Drive")
-
-    except Exception as e:
-        print("Geen database gevonden in Drive:", e)
-
-
 def init_db():
-
     conn = db()
     cur = conn.cursor()
 
@@ -123,6 +203,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS counted (
             vestiging TEXT NOT NULL,
             artikelcode TEXT NOT NULL,
+            geteld INTEGER,
+            locatie TEXT,
             counted_date TEXT NOT NULL,
             PRIMARY KEY (vestiging, artikelcode)
         )
@@ -141,38 +223,32 @@ def init_db():
     """)
 
     conn.commit()
-conn.close()
+    conn.close()
 
+
+load_db_from_drive()
+init_db()
 upload_db_to_drive()
 
 
-# Eerst database uit Drive laden
-load_db_from_drive()
-
-# Daarna database initialiseren
-init_db()
-
-
-# -------------------- Mail --------------------
-import requests
-import base64
-import os
-
+# -------------------- Mail via Resend --------------------
 
 def send_mail(csv_bytes: bytes, vestiging: str):
-
     api_key = os.getenv("RESEND_API_KEY")
+    if not api_key:
+        print("GEEN RESEND_API_KEY GEVONDEN")
+        return
 
     encoded = base64.b64encode(csv_bytes).decode()
 
     payload = {
-        "from": "onboarding@resend.dev",
-        "to": ["ypekramertellen@gmail.com"],
+        "from": os.getenv("RESEND_FROM", "onboarding@resend.dev"),
+        "to": [os.getenv("RESEND_TO", "ypekramertellen@gmail.com")],
         "subject": f"Voorraad afwijkingen {vestiging}",
         "html": "<p>Zie bijlage met voorraad afwijkingen.</p>",
         "attachments": [
             {
-                "filename": f"afwijkingen_{vestiging}.csv",
+                "filename": f"afwijkingen_{vestiging}_{date.today().isoformat()}.csv",
                 "content": encoded
             }
         ]
@@ -184,12 +260,13 @@ def send_mail(csv_bytes: bytes, vestiging: str):
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
-        json=payload
+        json=payload,
+        timeout=30,
     )
 
     print("MAIL STATUS:", r.status_code)
     print("MAIL RESPONSE:", r.text)
-    
+
 
 # -------------------- FastAPI Setup --------------------
 
@@ -236,7 +313,12 @@ def home(request: Request):
     historie = get_historie_counts()
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "title": APP_TITLE, "historie": historie, "error": None},
+        {
+            "request": request,
+            "title": APP_TITLE,
+            "historie": historie,
+            "error": None
+        },
     )
 
 
@@ -247,7 +329,7 @@ async def upload(
     aantal: int = Form(25),
 ):
     filename = f"{vestiging}.csv"
-    content = download_csv_from_drive(filename)
+    content = download_file_from_drive(filename)
 
     if not content:
         historie = get_historie_counts()
@@ -300,18 +382,29 @@ async def upload(
 
     picked = cur.fetchall()
 
-    # Oude selection data voor dit id weg (veiligheid)
     cur.execute("DELETE FROM selections WHERE selection_id=?", (selection_id,))
 
     for r in picked:
         cur.execute(
-            "INSERT INTO selections(vestiging, selection_id, artikelcode, locatie, voorraad, omschrijving) "
-            "VALUES (?,?,?,?,?,?)",
-            (vestiging, selection_id, r["artikelcode"], r["locatie"], r["voorraad"], r["omschrijving"]),
+            """
+            INSERT INTO selections(
+                vestiging, selection_id, artikelcode, locatie, voorraad, omschrijving
+            ) VALUES (?,?,?,?,?,?)
+            """,
+            (
+                vestiging,
+                selection_id,
+                r["artikelcode"],
+                r["locatie"],
+                r["voorraad"],
+                r["omschrijving"],
+            ),
         )
 
     conn.commit()
     conn.close()
+
+    upload_db_to_drive()
 
     return RedirectResponse(url=f"/tellen/{selection_id}", status_code=303)
 
@@ -322,10 +415,21 @@ def tellen(selection_id: str, request: Request):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT id, vestiging, artikelcode, locatie, voorraad, omschrijving
-        FROM selections
-        WHERE selection_id=?
-        ORDER BY COALESCE(locatie,''), artikelcode
+        SELECT
+            s.id,
+            s.vestiging,
+            s.artikelcode,
+            s.locatie,
+            s.voorraad,
+            s.omschrijving,
+            c.geteld as last_geteld,
+            c.locatie as last_locatie
+        FROM selections s
+        LEFT JOIN counted c
+          ON s.artikelcode = c.artikelcode
+         AND s.vestiging = c.vestiging
+        WHERE s.selection_id=?
+        ORDER BY COALESCE(s.locatie,''), s.artikelcode
     """, (selection_id,))
 
     rows = cur.fetchall()
@@ -333,7 +437,12 @@ def tellen(selection_id: str, request: Request):
 
     return templates.TemplateResponse(
         "tellen.html",
-        {"request": request, "selection_id": selection_id, "rows": rows},
+        {
+            "request": request,
+            "selection_id": selection_id,
+            "rows": rows,
+            "n": len(rows),
+        },
     )
 
 
@@ -360,30 +469,70 @@ async def verwerk(selection_id: str, request: Request):
 
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["Artikelcode", "Locatie", "Systeem", "Geteld", "Verschil"])
+    w.writerow([
+        "Artikelcode",
+        "Oude locatie",
+        "Nieuwe locatie",
+        "Systeem",
+        "Geteld",
+        "Verschil"
+    ])
 
     for r in rows:
-        raw = (form.get(f"geteld_{r['id']}") or "").strip()
+        raw_geteld = (form.get(f"geteld_{r['id']}") or "").strip()
+        raw_locatie_scan = (form.get(f"locatie_scan_{r['id']}") or "").strip()
 
         try:
-            geteld = int(raw) if raw != "" else int(r["voorraad"] or 0)
+            geteld = int(raw_geteld) if raw_geteld != "" else int(r["voorraad"] or 0)
         except Exception:
             geteld = int(r["voorraad"] or 0)
 
         systeem = int(r["voorraad"] or 0)
+        oude_locatie = (r["locatie"] or "").strip()
+        nieuwe_locatie = raw_locatie_scan if raw_locatie_scan else oude_locatie
 
-        if geteld != systeem:
-            w.writerow([r["artikelcode"], r["locatie"], systeem, geteld, geteld - systeem])
+        if geteld != systeem or nieuwe_locatie != oude_locatie:
+            w.writerow([
+                r["artikelcode"],
+                oude_locatie,
+                nieuwe_locatie,
+                systeem,
+                geteld,
+                geteld - systeem
+            ])
 
         cur.execute("""
-            INSERT INTO counted(vestiging, artikelcode, counted_date)
-            VALUES (?,?,?)
+            INSERT INTO counted(vestiging, artikelcode, geteld, locatie, counted_date)
+            VALUES (?,?,?,?,?)
             ON CONFLICT(vestiging, artikelcode)
-            DO UPDATE SET counted_date=excluded.counted_date
-        """, (vestiging, r["artikelcode"], date.today().isoformat()))
+            DO UPDATE SET
+                geteld=excluded.geteld,
+                locatie=excluded.locatie,
+                counted_date=excluded.counted_date
+        """, (
+            vestiging,
+            r["artikelcode"],
+            geteld,
+            nieuwe_locatie,
+            date.today().isoformat()
+        ))
+
+        cur.execute("""
+            UPDATE stock
+            SET locatie=?
+            WHERE vestiging=? AND artikelcode=?
+        """, (nieuwe_locatie, vestiging, r["artikelcode"]))
+
+        cur.execute("""
+            UPDATE selections
+            SET locatie=?
+            WHERE id=?
+        """, (nieuwe_locatie, r["id"]))
 
     conn.commit()
     conn.close()
+
+    upload_db_to_drive()
 
     csv_bytes = buf.getvalue().encode("utf-8-sig")
     send_mail(csv_bytes, vestiging)
