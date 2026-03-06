@@ -25,7 +25,7 @@ DB_PATH = "/tmp/app.db"
 CONFIG_PATH = "config.json"
 
 SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
-DRIVE_FOLDER_NAME = "Voorraadtellen"
+DRIVE_FOLDER_ID = "1z2J-d775ZdQ4nLtwK1YONnENN-fXpbpw"
 
 VESTIGINGEN = ["Leeuwarden", "Sneek", "Drachten"]
 
@@ -173,6 +173,8 @@ def upload_db_to_drive():
 
     service = get_drive_service()
 
+    media = MediaFileUpload(DB_PATH, mimetype="application/octet-stream")
+
     results = service.files().list(
         q="name='app.db' and trashed=false",
         fields="files(id,name)",
@@ -180,8 +182,6 @@ def upload_db_to_drive():
     ).execute()
 
     files = results.get("files", [])
-
-    media = MediaFileUpload(DB_PATH, mimetype="application/octet-stream")
 
     if files:
 
@@ -194,6 +194,19 @@ def upload_db_to_drive():
 
         print("DATABASE UPDATED IN DRIVE")
 
+    else:
+
+        service.files().create(
+            body={
+                "name": "app.db",
+                "parents": [DRIVE_FOLDER_ID]
+            },
+            media_body=media,
+            fields="id"
+        ).execute()
+
+        print("DATABASE CREATED IN DRIVE")
+        
     else:
 
         service.files().create(
