@@ -20,7 +20,7 @@ from googleapiclient.discovery import build
 
 
 APP_TITLE = "Ype Kramer Tellingen"
-DB_PATH = "app.db"
+DB_PATH = "/tmp/app.db"
 CONFIG_PATH = "config.json"
 
 # Render secret file path
@@ -89,7 +89,22 @@ def download_csv_from_drive(filename: str):
 
 # -------------------- Database --------------------
 
+def load_db_from_drive():
+
+    try:
+        content = download_csv_from_drive("app.db")
+
+        if content:
+            with open(DB_PATH, "wb") as f:
+                f.write(content)
+            print("Database geladen uit Google Drive")
+
+    except Exception as e:
+        print("Geen database gevonden in Drive:", e)
+
+
 def init_db():
+
     conn = db()
     cur = conn.cursor()
 
@@ -129,6 +144,10 @@ def init_db():
     conn.close()
 
 
+# Eerst database uit Drive laden
+load_db_from_drive()
+
+# Daarna database initialiseren
 init_db()
 
 
