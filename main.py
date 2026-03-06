@@ -183,16 +183,18 @@ def upload_db_to_drive():
 
     files = results.get("files", [])
 
-    if files:
+    if not files:
+        print("app.db niet gevonden in Drive")
+        return
 
-        file_id = files[0]["id"]
+    file_id = files[0]["id"]
 
-        service.files().update(
-            fileId=file_id,
-            media_body=media
-        ).execute()
+    service.files().update(
+        fileId=file_id,
+        media_body=media
+    ).execute()
 
-        print("DATABASE UPDATED IN DRIVE")
+    print("DATABASE UPDATED IN DRIVE")
 
     else:
 
