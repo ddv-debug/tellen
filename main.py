@@ -170,7 +170,38 @@ def load_db_from_drive():
 
 
 def upload_db_to_drive():
-    upload_file_to_drive(DB_PATH, "app.db")
+
+    service = get_drive_service()
+
+    results = service.files().list(
+        q="name='app.db' and trashed=false",
+        fields="files(id,name)",
+        pageSize=1
+    ).execute()
+
+    files = results.get("files", [])
+
+    media = MediaFileUpload(DB_PATH, mimetype="application/octet-stream")
+
+    if files:
+
+        file_id = files[0]["id"]
+
+        service.files().update(
+            fileId=file_id,
+            media_body=media
+        ).execute()
+
+        print("DATABASE UPDATED IN DRIVE")
+
+    else:
+
+        service.files().create(
+            body={"name":"app.db"},
+            media_body=media
+        ).execute()
+
+        print("DATABASE AANGEMAAKT IN DRIVE")
 
 
 def get_historie_counts() -> dict:
