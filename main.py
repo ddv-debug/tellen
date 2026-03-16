@@ -372,130 +372,6 @@ def home(request: Request):
     )
 
 
-@app.post("/upload")
-async def upload(
-    request: Request,
-    vestiging: str = Form(...),
-    aantal: int = Form(25),
-):
-    filename = f"{vestiging}.csv"
-    content = download_file_from_drive(filename)
-
-    if not content:
-        historie = get_historie_counts()
-        return templates.TemplateResponse(
-            "index.html",
-            {
-                "request": request,
-                "title": APP_TITLE,
-                "error": f"Bestand {filename} niet gevonden in Google Drive",
-                "historie": historie,
-            },
-        )
-
-    rows = ingest_csv(content)
-
-    if not rows:
-        historie = get_historie_counts()
-        return templates.TemplateResponse(
-            "index.html",
-            {
-                "request": request,
-                "title": APP_TITLE,
-                "error": f"Bestand {filename} bevat geen regels",
-                "historie": historie,
-            },
-        )
-
-    selection_id = datetime.now().strftime("%Y%m%d%H%M%S")
-
-    conn = db()
-    cur = conn.cursor()
-
-    cur.execute("DELETE FROM stock WHERE vestiging=?", (vestiging,))
-    cur.executemany(
-        "INSERT INTO stock(vestiging, artikelcode, locatie, voorraad, omschrijving) VALUES (?,?,?,?,?)",
-        [(vestiging, r[0], r[1], r[2], r[3]) for r in rows],
-    )
-
-    cur.execute("""
-        SELECT s.artikelcode, s.locatie, s.voorraad, s.omschrijving
-        FROM stock s
-        LEFT JOIN counted c
-          ON s.artikelcode = c.artikelcode
-         AND s.vestiging = c.vestiging
-        WHERE s.vestiging = ?
-          AND c.artikelcode IS NULL
-        ORDER BY RANDOM()
-        LIMIT ?
-    """, (vestiging, int(aantal)))
-
-    picked = cur.fetchall()
-
-    cur.execute("DELETE FROM selections WHERE selection_id=?", (selection_id,))
-
-    for r in picked:
-        cur.execute(
-            """
-            INSERT INTO selections(
-                vestiging, selection_id, artikelcode, locatie, voorraad, omschrijving
-            ) VALUES (?,?,?,?,?,?)
-            """,
-            (
-                vestiging,
-                selection_id,
-                r["artikelcode"],
-                r["locatie"],
-                r["voorraad"],
-                r["omschrijving"],
-            ),
-        )
-
-    conn.commit()
-    conn.close()
-
-    upload_db_to_drive()
-
-    return RedirectResponse(url=f"/tellen/{selection_id}", status_code=303)
-
-
-@app.get("/tellen/{selection_id}", response_class=HTMLResponse)
-def tellen(selection_id: str, request: Request):
-    conn = db()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT
-            s.id,
-            s.vestiging,
-            s.artikelcode,
-            s.locatie,
-            s.voorraad,
-            s.omschrijving,
-            c.geteld as last_geteld,
-            c.locatie as last_locatie
-        FROM selections s
-        LEFT JOIN counted c
-          ON s.artikelcode = c.artikelcode
-         AND s.vestiging = c.vestiging
-        WHERE s.selection_id=?
-        ORDER BY COALESCE(s.locatie,''), s.artikelcode
-    """, (selection_id,))
-
-    rows = cur.fetchall()
-    conn.close()
-
-    return templates.TemplateResponse(
-        "tellen.html",
-        {
-            "request": request,
-            "selection_id": selection_id,
-            "rows": rows,
-            "n": len(rows),
-        },
-    )
-
-
 @app.post("/verwerk/{selection_id}")
 async def verwerk(selection_id: str, request: Request):
     form = await request.form()
@@ -525,12 +401,15 @@ async def verwerk(selection_id: str, request: Request):
         "Nieuwe locatie",
         "Systeem",
         "Geteld",
-        "Verschil"
+        "Verschil",
+        "Locatie gewijzigd"
     ])
 
     for r in rows:
         raw_geteld = (form.get(f"geteld_{r['id']}") or "").strip()
-        raw_locatie_scan = (form.get(f"locatie_scan_{r['id']}") or "").strip()
+        raw_locatie_correctie = (form.get(f"locatie_correctie_{r['id']}") or "").strip()
+
+        oude_locatie = (r["locatie"] or "").strip()
 
         try:
             geteld = int(raw_geteld) if raw_geteld != "" else int(r["voorraad"] or 0)
@@ -538,19 +417,29 @@ async def verwerk(selection_id: str, request: Request):
             geteld = int(r["voorraad"] or 0)
 
         systeem = int(r["voorraad"] or 0)
-        oude_locatie = (r["locatie"] or "").strip()
-        nieuwe_locatie = raw_locatie_scan if raw_locatie_scan else oude_locatie
 
-        if geteld != systeem or nieuwe_locatie != oude_locatie:
+        # Alleen locatie aanpassen als er echt iets is ingevuld
+        if raw_locatie_correctie:
+            nieuwe_locatie = raw_locatie_correctie
+        else:
+            nieuwe_locatie = oude_locatie
+
+        locatie_gewijzigd = nieuwe_locatie != oude_locatie
+        voorraad_gewijzigd = geteld != systeem
+
+        # Als OF voorraad OF locatie gewijzigd is, dan moet hij in de mail komen
+        if voorraad_gewijzigd or locatie_gewijzigd:
             w.writerow([
                 r["artikelcode"],
                 oude_locatie,
                 nieuwe_locatie,
                 systeem,
                 geteld,
-                geteld - systeem
+                geteld - systeem,
+                "JA" if locatie_gewijzigd else "NEE"
             ])
 
+        # Historie opslaan
         cur.execute("""
             INSERT INTO counted(vestiging, artikelcode, geteld, locatie, counted_date)
             VALUES (?,?,?,?,?)
@@ -567,12 +456,15 @@ async def verwerk(selection_id: str, request: Request):
             date.today().isoformat()
         ))
 
-        cur.execute("""
-            UPDATE stock
-            SET locatie=?
-            WHERE vestiging=? AND artikelcode=?
-        """, (nieuwe_locatie, vestiging, r["artikelcode"]))
+        # Stock ook bijwerken als locatie gewijzigd is
+        if locatie_gewijzigd:
+            cur.execute("""
+                UPDATE stock
+                SET locatie=?
+                WHERE vestiging=? AND artikelcode=?
+            """, (nieuwe_locatie, vestiging, r["artikelcode"]))
 
+        # Selection ook bijwerken
         cur.execute("""
             UPDATE selections
             SET locatie=?
