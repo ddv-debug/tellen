@@ -25,7 +25,7 @@ DB_PATH = "/tmp/app.db"
 CONFIG_PATH = "config.json"
 
 SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
-DRIVE_FOLDER_ID = "1z2J-d775ZdQ4nLtwK1YONnENN-fXpbpw"
+DRIVE_FOLDER_ID = "1IC63Pk55dcwW3SwkVqmJaU85xT2y6a52"
 
 VESTIGINGEN = ["Leeuwarden", "Sneek", "Drachten"]
 
