@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
-import sqlite3
+import base64
 import csv
 import io
-import os
-import sys
-from datetime import datetime, date
 import json
-import base64
-import requests
+import os
+import sqlite3
+import sys
+import uuid
+from datetime import date
 
+import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 
 APP_TITLE = "Ype Kramer Tellingen"
@@ -53,33 +54,14 @@ def read_config():
         return {}
 
 
+# -------------------- Google Drive --------------------
+
 def get_drive_service():
     credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
         scopes=["https://www.googleapis.com/auth/drive"],
     )
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
-
-def get_drive_folder_id(service):
-
-    results = service.files().list(
-        q=f"name='{DRIVE_FOLDER_NAME}' and trashed=false",
-        fields="files(id, name)",
-        pageSize=10,
-    ).execute()
-
-    folders = results.get("files", [])
-
-    if not folders:
-        print("MAP NIET GEVONDEN:", DRIVE_FOLDER_NAME)
-        return None
-
-    folder_id = folders[0]["id"]
-
-    print("MAP GEVONDEN:", DRIVE_FOLDER_NAME, folder_id)
-
-    return folder_id
-
 
 
 def find_file_in_drive(service, filename: str, folder_id: str | None = None):
@@ -90,8 +72,10 @@ def find_file_in_drive(service, filename: str, folder_id: str | None = None):
 
     results = service.files().list(
         q=q,
-        fields="files(id, name)",
+        fields="files(id, name, parents)",
         pageSize=10,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
     ).execute()
 
     files = results.get("files", [])
@@ -103,10 +87,12 @@ def find_file_in_drive(service, filename: str, folder_id: str | None = None):
 def download_file_from_drive(filename: str):
     try:
         service = get_drive_service()
-        folder_id = get_drive_folder_id(service)
 
-        file_info = find_file_in_drive(service, filename, folder_id)
+        print("ZOEK BESTAND IN DRIVE:", filename, "MAP:", DRIVE_FOLDER_ID)
+        file_info = find_file_in_drive(service, filename, DRIVE_FOLDER_ID)
+
         if not file_info:
+            print("BESTAND NIET GEVONDEN IN DRIVE:", filename)
             return None
 
         request = service.files().get_media(fileId=file_info["id"])
@@ -117,6 +103,7 @@ def download_file_from_drive(filename: str):
         while not done:
             _, done = downloader.next_chunk()
 
+        print("BESTAND GEDOWNLOAD UIT DRIVE:", filename)
         return fh.getvalue()
 
     except Exception as e:
@@ -127,33 +114,32 @@ def download_file_from_drive(filename: str):
 def upload_file_to_drive(local_path: str, filename: str):
     try:
         if not os.path.exists(local_path):
-            print("UPLOAD DRIVE FOUT: bestand ontbreekt lokaal")
+            print("UPLOAD DRIVE FOUT: bestand ontbreekt lokaal:", local_path)
             return
 
         service = get_drive_service()
-        folder_id = get_drive_folder_id(service)
-
         media = MediaFileUpload(local_path, mimetype="application/octet-stream")
 
-        existing = find_file_in_drive(service, filename, folder_id)
+        existing = find_file_in_drive(service, filename, DRIVE_FOLDER_ID)
 
         if existing:
             service.files().update(
                 fileId=existing["id"],
-                media_body=media
-            ).execute()
-        else:
-            body = {"name": filename}
-            if folder_id:
-                body["parents"] = [folder_id]
-
-            service.files().create(
-                body=body,
                 media_body=media,
-                fields="id"
+                supportsAllDrives=True,
             ).execute()
-
-        print(f"BESTAND GEUPLOAD NAAR DRIVE: {filename}")
+            print("BESTAND UPDATED IN DRIVE:", filename)
+        else:
+            service.files().create(
+                body={
+                    "name": filename,
+                    "parents": [DRIVE_FOLDER_ID],
+                },
+                media_body=media,
+                fields="id",
+                supportsAllDrives=True,
+            ).execute()
+            print("BESTAND AANGEMAAKT IN DRIVE:", filename)
 
     except Exception as e:
         print("UPLOAD DRIVE FOUT:", e)
@@ -170,66 +156,7 @@ def load_db_from_drive():
 
 
 def upload_db_to_drive():
-
-    service = get_drive_service()
-
-    media = MediaFileUpload(DB_PATH, mimetype="application/octet-stream")
-
-    results = service.files().list(
-        q="name='app.db' and trashed=false",
-        fields="files(id,name)",
-        pageSize=1
-    ).execute()
-
-    files = results.get("files", [])
-
-    if not files:
-        print("app.db niet gevonden in Drive")
-        return
-
-    file_id = files[0]["id"]
-
-    service.files().update(
-        fileId=file_id,
-        media_body=media
-    ).execute()
-
-    print("DATABASE UPDATED IN DRIVE")
-
-    else:
-
-        service.files().create(
-            body={
-                "name": "app.db",
-                "parents": [DRIVE_FOLDER_ID]
-            },
-            media_body=media,
-            fields="id"
-        ).execute()
-
-        print("DATABASE CREATED IN DRIVE")
-        
-    else:
-
-        service.files().create(
-            body={"name":"app.db"},
-            media_body=media
-        ).execute()
-
-        print("DATABASE AANGEMAAKT IN DRIVE")
-
-
-def get_historie_counts() -> dict:
-    historie = {}
-    conn = db()
-    cur = conn.cursor()
-
-    for v in VESTIGINGEN:
-        cur.execute("SELECT COUNT(1) FROM counted WHERE vestiging=?", (v,))
-        historie[v] = cur.fetchone()[0]
-
-    conn.close()
-    return historie
+    upload_file_to_drive(DB_PATH, "app.db")
 
 
 # -------------------- Database --------------------
@@ -247,6 +174,11 @@ def init_db():
             voorraad INTEGER,
             omschrijving TEXT
         )
+    """)
+
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_unique
+        ON stock(vestiging, artikelcode)
     """)
 
     cur.execute("""
@@ -276,53 +208,17 @@ def init_db():
     conn.close()
 
 
-load_db_from_drive()
-init_db()
-upload_db_to_drive()
+def get_historie_counts() -> dict:
+    historie = {}
+    conn = db()
+    cur = conn.cursor()
 
+    for v in VESTIGINGEN:
+        cur.execute("SELECT COUNT(1) FROM counted WHERE vestiging=?", (v,))
+        historie[v] = cur.fetchone()[0]
 
-# -------------------- Mail via Resend --------------------
-
-def send_mail(csv_bytes: bytes, vestiging: str):
-    api_key = os.getenv("RESEND_API_KEY")
-    if not api_key:
-        print("GEEN RESEND_API_KEY GEVONDEN")
-        return
-
-    encoded = base64.b64encode(csv_bytes).decode()
-
-    payload = {
-        "from": os.getenv("RESEND_FROM", "onboarding@resend.dev"),
-        "to": [os.getenv("RESEND_TO", "ypekramertellen@gmail.com")],
-        "subject": f"Voorraad afwijkingen {vestiging}",
-        "html": "<p>Zie bijlage met voorraad afwijkingen.</p>",
-        "attachments": [
-            {
-                "filename": f"afwijkingen_{vestiging}_{date.today().isoformat()}.csv",
-                "content": encoded
-            }
-        ]
-    }
-
-    r = requests.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=30,
-    )
-
-    print("MAIL STATUS:", r.status_code)
-    print("MAIL RESPONSE:", r.text)
-
-
-# -------------------- FastAPI Setup --------------------
-
-app = FastAPI(title=APP_TITLE)
-templates = Jinja2Templates(directory=resource_path("templates"))
-app.mount("/static", StaticFiles(directory=resource_path("static")), name="static")
+    conn.close()
+    return historie
 
 
 # -------------------- CSV Parser --------------------
@@ -356,6 +252,97 @@ def ingest_csv(content: bytes):
     return rows
 
 
+def replace_stock_for_vestiging(vestiging: str, rows: list[tuple[str, str, int, str]]):
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM stock WHERE vestiging=?", (vestiging,))
+
+    cur.executemany("""
+        INSERT INTO stock (vestiging, artikelcode, locatie, voorraad, omschrijving)
+        VALUES (?, ?, ?, ?, ?)
+    """, [
+        (vestiging, art, loc, qty, desc)
+        for art, loc, qty, desc in rows
+    ])
+
+    conn.commit()
+    conn.close()
+
+
+def create_selection_for_vestiging(vestiging: str):
+    selection_id = uuid.uuid4().hex[:12]
+
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM selections WHERE vestiging=?", (vestiging,))
+
+    cur.execute("""
+        INSERT INTO selections (vestiging, selection_id, artikelcode, locatie, voorraad, omschrijving)
+        SELECT vestiging, ?, artikelcode, locatie, voorraad, omschrijving
+        FROM stock
+        WHERE vestiging=?
+        ORDER BY locatie, artikelcode
+    """, (selection_id, vestiging))
+
+    conn.commit()
+    conn.close()
+
+    return selection_id
+
+
+# -------------------- Mail via Resend --------------------
+
+def send_mail(csv_bytes: bytes, vestiging: str):
+    api_key = os.getenv("RESEND_API_KEY")
+    if not api_key:
+        print("GEEN RESEND_API_KEY GEVONDEN")
+        return
+
+    encoded = base64.b64encode(csv_bytes).decode()
+
+    payload = {
+        "from": os.getenv("RESEND_FROM", "onboarding@resend.dev"),
+        "to": [os.getenv("RESEND_TO", "ypekramertellen@gmail.com")],
+        "subject": f"Voorraad afwijkingen {vestiging}",
+        "html": "<p>Zie bijlage met voorraad afwijkingen.</p>",
+        "attachments": [
+            {
+                "filename": f"afwijkingen_{vestiging}_{date.today().isoformat()}.csv",
+                "content": encoded,
+            }
+        ],
+    }
+
+    r = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+
+    print("MAIL STATUS:", r.status_code)
+    print("MAIL RESPONSE:", r.text)
+
+
+# -------------------- Startup --------------------
+
+load_db_from_drive()
+init_db()
+upload_db_to_drive()
+
+
+# -------------------- FastAPI Setup --------------------
+
+app = FastAPI(title=APP_TITLE)
+templates = Jinja2Templates(directory=resource_path("templates"))
+app.mount("/static", StaticFiles(directory=resource_path("static")), name="static")
+
+
 # -------------------- Routes --------------------
 
 @app.get("/", response_class=HTMLResponse)
@@ -367,12 +354,107 @@ def home(request: Request):
             "request": request,
             "title": APP_TITLE,
             "historie": historie,
-            "error": None
+            "error": None,
         },
     )
 
 
-@app.post("/verwerk/{selection_id}")
+@app.api_route("/", methods=["HEAD"])
+def home_head():
+    return HTMLResponse(status_code=200)
+
+
+@app.post("/upload", response_class=HTMLResponse)
+async def upload_csv(
+    request: Request,
+    vestiging: str = Form(...),
+    file: UploadFile = File(...),
+):
+    try:
+        if vestiging not in VESTIGINGEN:
+            historie = get_historie_counts()
+            return templates.TemplateResponse(
+                "index.html",
+                {
+                    "request": request,
+                    "title": APP_TITLE,
+                    "historie": historie,
+                    "error": "Ongeldige vestiging gekozen",
+                },
+                status_code=400,
+            )
+
+        content = await file.read()
+        rows = ingest_csv(content)
+
+        if not rows:
+            historie = get_historie_counts()
+            return templates.TemplateResponse(
+                "index.html",
+                {
+                    "request": request,
+                    "title": APP_TITLE,
+                    "historie": historie,
+                    "error": "CSV bevat geen geldige regels",
+                },
+                status_code=400,
+            )
+
+        replace_stock_for_vestiging(vestiging, rows)
+        upload_db_to_drive()
+
+        selection_id = create_selection_for_vestiging(vestiging)
+        upload_db_to_drive()
+
+        return RedirectResponse(url=f"/selectie/{selection_id}", status_code=303)
+
+    except Exception as e:
+        print("UPLOAD FOUT:", e)
+        historie = get_historie_counts()
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "title": APP_TITLE,
+                "historie": historie,
+                "error": f"Upload fout: {e}",
+            },
+            status_code=500,
+        )
+
+
+@app.get("/selectie/{selection_id}", response_class=HTMLResponse)
+def selectie(request: Request, selection_id: str):
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, vestiging, artikelcode, locatie, voorraad, omschrijving
+        FROM selections
+        WHERE selection_id=?
+        ORDER BY locatie, artikelcode
+    """, (selection_id,))
+    rows = cur.fetchall()
+    conn.close()
+
+    if not rows:
+        return RedirectResponse("/", status_code=303)
+
+    vestiging = rows[0]["vestiging"]
+
+    return templates.TemplateResponse(
+        "selectie.html",
+        {
+            "request": request,
+            "title": APP_TITLE,
+            "selection_id": selection_id,
+            "vestiging": vestiging,
+            "rows": rows,
+        },
+    )
+
+
+@app.post("/verwerk/{selection_id}", response_class=HTMLResponse)
 async def verwerk(selection_id: str, request: Request):
     form = await request.form()
 
@@ -383,8 +465,8 @@ async def verwerk(selection_id: str, request: Request):
         SELECT id, vestiging, artikelcode, locatie, voorraad, omschrijving
         FROM selections
         WHERE selection_id=?
+        ORDER BY locatie, artikelcode
     """, (selection_id,))
-
     rows = cur.fetchall()
 
     if not rows:
@@ -402,7 +484,7 @@ async def verwerk(selection_id: str, request: Request):
         "Systeem",
         "Geteld",
         "Verschil",
-        "Locatie gewijzigd"
+        "Locatie gewijzigd",
     ])
 
     for r in rows:
@@ -418,7 +500,6 @@ async def verwerk(selection_id: str, request: Request):
 
         systeem = int(r["voorraad"] or 0)
 
-        # Alleen locatie aanpassen als er echt iets is ingevuld
         if raw_locatie_correctie:
             nieuwe_locatie = raw_locatie_correctie
         else:
@@ -427,7 +508,6 @@ async def verwerk(selection_id: str, request: Request):
         locatie_gewijzigd = nieuwe_locatie != oude_locatie
         voorraad_gewijzigd = geteld != systeem
 
-        # Als OF voorraad OF locatie gewijzigd is, dan moet hij in de mail komen
         if voorraad_gewijzigd or locatie_gewijzigd:
             w.writerow([
                 r["artikelcode"],
@@ -436,13 +516,12 @@ async def verwerk(selection_id: str, request: Request):
                 systeem,
                 geteld,
                 geteld - systeem,
-                "JA" if locatie_gewijzigd else "NEE"
+                "JA" if locatie_gewijzigd else "NEE",
             ])
 
-        # Historie opslaan
         cur.execute("""
             INSERT INTO counted(vestiging, artikelcode, geteld, locatie, counted_date)
-            VALUES (?,?,?,?,?)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(vestiging, artikelcode)
             DO UPDATE SET
                 geteld=excluded.geteld,
@@ -453,10 +532,9 @@ async def verwerk(selection_id: str, request: Request):
             r["artikelcode"],
             geteld,
             nieuwe_locatie,
-            date.today().isoformat()
+            date.today().isoformat(),
         ))
 
-        # Stock ook bijwerken als locatie gewijzigd is
         if locatie_gewijzigd:
             cur.execute("""
                 UPDATE stock
@@ -464,7 +542,6 @@ async def verwerk(selection_id: str, request: Request):
                 WHERE vestiging=? AND artikelcode=?
             """, (nieuwe_locatie, vestiging, r["artikelcode"]))
 
-        # Selection ook bijwerken
         cur.execute("""
             UPDATE selections
             SET locatie=?
@@ -481,5 +558,9 @@ async def verwerk(selection_id: str, request: Request):
 
     return templates.TemplateResponse(
         "verwerkt.html",
-        {"request": request, "selection_id": selection_id},
+        {
+            "request": request,
+            "selection_id": selection_id,
+            "vestiging": vestiging,
+        },
     )
