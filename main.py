@@ -479,7 +479,7 @@ def selectie(request: Request, selection_id: str):
     vestiging = rows[0]["vestiging"]
 
     return templates.TemplateResponse(
-        "selectie.html",
+        "tellen.html",
         {
             "request": request,
             "title": APP_TITLE,
